@@ -43,7 +43,24 @@ Two notes on that choice:
 Prefer a real GND pin? Wire the button to any GND pin and build with `-D BTN_RETURN_PIN=-1`.
 
 The onboard LED (GPIO2) shows state: **slow blink** = advertising, **solid** = phone connected,
-**quick flash** = shutter fired.
+**fast blink** = self-timer counting down, **quick flash** = shutter fired.
+
+## Self-timer
+
+Press the button, wait, then the photo is taken — so you have time to pose.
+
+```bash
+pio run -t upload    # after changing SHUTTER_DELAY_MS in platformio.ini
+```
+
+The default is **1000 ms**. Set `SHUTTER_DELAY_MS=0` to fire instantly, or `3000` for a
+three-second pose window. The LED blinks fast during the countdown so you can see it running.
+
+Worth knowing:
+
+- Presses during the countdown are **ignored**, not queued — you cannot stack up multiple shots.
+- If the phone disconnects mid-countdown, the shot is **cancelled** rather than fired blindly.
+- Changing the delay needs a re-flash. It is a compile-time flag, not a runtime setting.
 
 ## Build and flash
 
@@ -106,7 +123,8 @@ Edit the `build_flags` in `platformio.ini`:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `SHUTTER_BURST_COUNT` | `3` | Photos per press. Set to `1` for one-shot. |
+| `SHUTTER_DELAY_MS` | `1000` | Self-timer: wait this long after the press, then shoot. `0` = instant. |
+| `SHUTTER_BURST_COUNT` | `1` | Photos per press. |
 | `SHUTTER_BURST_GAP_MS` | `400` | Gap between shots. |
 | `SHUTTER_SEND_ENTER` | `0` | Also send Enter (Android fallback). |
 | `BTN_RETURN_PIN` | `26` | `-1` if wired to a real GND pin. |

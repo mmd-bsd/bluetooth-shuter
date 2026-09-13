@@ -32,6 +32,13 @@
 #define SHUTTER_SEND_ENTER 0
 #endif
 
+// Self-timer: how long to wait after the button press before firing the shutter,
+// so you have time to pose. 0 fires immediately. The wait is non-blocking, so
+// the LED keeps blinking the countdown instead of freezing.
+#ifndef SHUTTER_DELAY_MS
+#define SHUTTER_DELAY_MS 1000
+#endif
+
 // GPIO26 as switched ground. Build with -D BTN_RETURN_PIN=-1 if you rewire the
 // button to a real GND pin instead.
 #ifndef BTN_RETURN_PIN
@@ -46,6 +53,7 @@ static const uint32_t KEY_HOLD_MS       = 30;   // gap between key-down and key-
 static const uint32_t ENTER_GAP_MS      = 50;
 static const uint32_t CONNECT_SETTLE_MS = 500;
 static const uint32_t LED_BLINK_MS      = 500;
+static const uint32_t LED_COUNTDOWN_MS  = 100;  // fast blink while self-timer runs
 static const uint32_t LED_PULSE_MS      = 60;
 
 // The library truncates the device name to 15 characters.
@@ -56,6 +64,8 @@ static bool     buttonRaw        = false;  // last raw read, true = pressed
 static bool     buttonStable     = false;  // debounced, true = pressed
 static uint32_t lastRawChangeMs  = 0;
 static bool     linkUp           = false;
+static bool     pendingShot      = false;  // self-timer armed, waiting to fire
+static uint32_t pendingShotAt    = 0;
 static bool     ledBlinkOn       = false;
 static uint32_t ledToggleMs      = 0;
 static bool     ledPulse         = false;
@@ -148,6 +158,11 @@ void setup() {
   Serial.printf("  led    : GPIO%u\n", (unsigned)PIN_LED);
   Serial.printf("  burst  : %u shot(s), %u ms apart\n",
                 (unsigned)SHUTTER_BURST_COUNT, (unsigned)SHUTTER_BURST_GAP_MS);
+  if (SHUTTER_DELAY_MS > 0) {
+    Serial.printf("  timer  : %u ms after the press\n", (unsigned)SHUTTER_DELAY_MS);
+  } else {
+    Serial.println("  timer  : off (fires immediately)");
+  }
 
   // If this says PRESSED with nothing touching the button, the wiring is wrong.
   Serial.printf("  button reads %s at rest (expect RELEASED)\n",
@@ -190,9 +205,30 @@ void loop() {
       Serial.println("Button pressed.");
       if (!bleKeyboard.isConnected()) {
         Serial.println("  not connected -- ignoring. Pair the phone first.");
+      } else if (pendingShot) {
+        Serial.println("  self-timer already running -- ignoring.");
+      } else if (SHUTTER_DELAY_MS > 0) {
+        pendingShot   = true;
+        pendingShotAt = now + SHUTTER_DELAY_MS;
+        ledToggleMs   = now;  // start the countdown blink cleanly
+        Serial.printf("  self-timer: firing in %u ms\n", (unsigned)SHUTTER_DELAY_MS);
       } else {
         shutterBurst();
       }
+    }
+  }
+
+  // -- self-timer ------------------------------------------------------------
+  // Fire the shutter once the delay elapses. Deliberately not a delay() in the
+  // button handler -- that would freeze the LED for the whole wait and stop the
+  // countdown from being visible.
+  if (pendingShot && (int32_t)(now - pendingShotAt) >= 0) {
+    pendingShot = false;
+    if (!bleKeyboard.isConnected()) {
+      Serial.println("Self-timer: link dropped, not firing.");
+    } else {
+      Serial.println("Self-timer elapsed -- firing.");
+      shutterBurst();
     }
   }
 
@@ -203,13 +239,17 @@ void loop() {
     ledPulse = false;
   }
 
+  const uint32_t blinkPeriod = pendingShot ? LED_COUNTDOWN_MS : LED_BLINK_MS;
+
   bool baseOn;
   if (!linkUp) {
-    if (now - ledToggleMs >= LED_BLINK_MS) {
+    if (now - ledToggleMs >= blinkPeriod) {
       ledToggleMs = now;
       ledBlinkOn = !ledBlinkOn;
     }
     baseOn = ledBlinkOn;
+  } else if (pendingShot) {
+    baseOn = !ledBlinkOn;  // blink the countdown even once connected
   } else {
     baseOn = true;
   }
